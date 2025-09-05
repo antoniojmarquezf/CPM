@@ -3,94 +3,80 @@ import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
 
-# =========================
-# Datos del proyecto
-# =========================
-sucesores = {
-    "A": ["B"],
-    "C": ["D"],
-    "B": ["E"],
-    "D": ["F", "G"],
-    "F": ["H"],
-    "E": [],
-    "G": [],
-    "H": []
-}
+st.title("Juego CPM - Ruta Crítica")
 
-duraciones = {
-    "A": 3,
-    "B": 2,
-    "C": 3,
-    "D": 1,
-    "E": 2,
-    "F": 1,
-    "G": 4,
-    "H": 2
-}
+# ----------- FASE 1: Construcción del grafo -----------
+st.header("1️⃣ Construye el grafo del proyecto")
 
-# =========================
-# Cálculo CPM (automático para corrección)
-# =========================
-# Crear grafo dirigido
+edges_input = st.text_area(
+    "Escribe las relaciones (Actividad -> Sucesora), una por línea",
+    "A,B\nC,D\nB,E\nD,F,G\nF,H"
+)
+
+edges = []
+if edges_input:
+    for line in edges_input.splitlines():
+        parts = line.split(",")
+        origen = parts[0].strip()
+        sucesores = [p.strip() for p in parts[1:]]
+        for suc in sucesores:
+            edges.append((origen, suc))
+
+# Crear grafo
 G = nx.DiGraph()
-for act, succs in sucesores.items():
-    for s in succs:
-        G.add_edge(act, s)
+G.add_edges_from(edges)
 
-# Forward Pass (Inicio/Fin temprano)
-ES, EF = {}, {}
-for act in nx.topological_sort(G):
-    if act not in G.predecessors(act):
-        ES[act] = max([EF[p] for p in G.predecessors(act)], default=0)
-    else:
-        ES[act] = 0
-    EF[act] = ES[act] + duraciones[act]
+# Dibujar grafo
+fig, ax = plt.subplots()
+nx.draw(G, with_labels=True, node_color="lightblue", node_size=1500, arrowsize=20, ax=ax)
+st.pyplot(fig)
 
-# Backward Pass (Inicio/Fin tardío)
-LS, LF = {}, {}
-max_time = max(EF.values())
-for act in reversed(list(nx.topological_sort(G))):
-    if list(G.successors(act)):
-        LF[act] = min([LS[s] for s in G.successors(act)])
-    else:
-        LF[act] = max_time
-    LS[act] = LF[act] - duraciones[act]
+# ----------- FASE 2: Asignación de duraciones -----------
+st.header("2️⃣ Asigna duraciones a cada actividad")
 
-# Holgura
-slack = {a: LS[a] - ES[a] for a in duraciones}
-ruta_critica = [a for a, h in slack.items() if h == 0]
+nodes = list(G.nodes())
+durations_df = pd.DataFrame({"Actividad": nodes, "Duración": [0]*len(nodes)})
+durations = st.data_editor(durations_df, num_rows="dynamic")
 
-# =========================
-# Interfaz Streamlit
-# =========================
-st.title("🎯 Juego CPM - Método de la Ruta Crítica")
+# ----------- FASE 3: Cálculo CPM -----------
+if st.button("Calcular CPM"):
+    # Guardar duraciones en dict
+    dur_dict = dict(zip(durations["Actividad"], durations["Duración"]))
 
-st.markdown("Ingresa tus cálculos de Inicio/Fin Temprano y Tardío para cada actividad:")
+    # Calcular forward pass (simplificado)
+    ES, EF = {}, {}
+    for node in nx.topological_sort(G):
+        if not list(G.predecessors(node)):
+            ES[node] = 0
+        else:
+            ES[node] = max(EF[p] for p in G.predecessors(node))
+        EF[node] = ES[node] + dur_dict[node]
 
-# Formulario de respuestas del estudiante
-respuestas = {}
-for act in duraciones.keys():
-    st.subheader(f"Actividad {act} (Duración {duraciones[act]}h)")
-    es = st.number_input(f"Inicio Temprano (ES) {act}", min_value=0, key=f"ES_{act}")
-    ef = st.number_input(f"Fin Temprano (EF) {act}", min_value=0, key=f"EF_{act}")
-    ls = st.number_input(f"Inicio Tardío (LS) {act}", min_value=0, key=f"LS_{act}")
-    lf = st.number_input(f"Fin Tardío (LF) {act}", min_value=0, key=f"LF_{act}")
-    respuestas[act] = {"ES": es, "EF": ef, "LS": ls, "LF": lf}
+    # Calcular backward pass
+    LS, LF = {}, {}
+    end_time = max(EF.values())
+    for node in reversed(list(nx.topological_sort(G))):
+        if not list(G.successors(node)):
+            LF[node] = end_time
+        else:
+            LF[node] = min(LS[s] for s in G.successors(node))
+        LS[node] = LF[node] - dur_dict[node]
 
-# Botón para corregir
-if st.button("✅ Verificar respuestas"):
-    st.subheader("📊 Corrección")
-    for act in duraciones.keys():
-        st.write(f"**{act}**")
-        st.write(f"- Tu respuesta: {respuestas[act]}")
-        st.write(f"- Correcto: ES={ES[act]}, EF={EF[act]}, LS={LS[act]}, LF={LF[act]}")
+    # Holgura
+    Slack = {n: LS[n] - ES[n] for n in G.nodes()}
 
-    st.subheader("🚀 Ruta Crítica")
-    st.write(f"Actividades en la ruta crítica: {', '.join(ruta_critica)}")
+    result = pd.DataFrame({
+        "Actividad": list(G.nodes()),
+        "Duración": [dur_dict[n] for n in G.nodes()],
+        "ES": [ES[n] for n in G.nodes()],
+        "EF": [EF[n] for n in G.nodes()],
+        "LS": [LS[n] for n in G.nodes()],
+        "LF": [LF[n] for n in G.nodes()],
+        "Holgura": [Slack[n] for n in G.nodes()],
+    })
 
-    # Dibujar grafo
-    pos = nx.spring_layout(G)
-    colors = ["red" if n in ruta_critica else "lightblue" for n in G.nodes()]
-    nx.draw(G, pos, with_labels=True, node_color=colors, node_size=1500, font_size=10)
-    nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): duraciones[u] for u, v in G.edges()})
-    st.pyplot(plt)
+    st.subheader("📊 Resultados CPM")
+    st.dataframe(result)
+
+    critical_path = [n for n in G.nodes() if Slack[n] == 0]
+    st.success(f"Ruta Crítica: {' -> '.join(critical_path)}")
